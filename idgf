@@ -1,0 +1,541 @@
+-- First load the anticheat bypass
+loadstring(game:HttpGet("https://raw.githubusercontent.com/AmareScripts/DeadRails/refs/heads/main/Bypass%25AntiCheat.lua"))()
+
+-- LAJ HUB Dead Rails Auto Farm Script
+-- This script automates farming in Dead Rails
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
+local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+
+-- Configuration
+local AutoFarmEnabled = false
+local AutoShootEnabled = false
+local AutoRespawnEnabled = false
+local AutoSprintEnabled = false
+local AutoReloadEnabled = false
+local TeleportToTargetsEnabled = false
+local AvoidDamageEnabled = false
+local TargetAll = true -- If false, will only target NPCs/Zombies
+
+-- Target finding variables
+local nearestTarget = nil
+local targetDistance = math.huge
+local targetRefreshRate = 0.2 -- How often to refresh target list
+local lastTargetRefresh = 0
+local farmRadius = 500 -- Max distance to consider targets
+
+-- Other variables
+local autoFarmConnection = nil
+local lastShotTime = 0
+local shotCooldown = 0.1 -- Time between shots
+local originalPos = nil
+local originalCF = nil
+
+-- Create GUI
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "LAJAutoFarmGUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = game.CoreGui
+
+-- Main Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 250, 0, 350)
+MainFrame.Position = UDim2.new(0, 20, 0.5, -175)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+-- Title bar
+local TitleBar = Instance.new("Frame")
+TitleBar.Name = "TitleBar"
+TitleBar.Size = UDim2.new(1, 0, 0, 30)
+TitleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = MainFrame
+
+local Title = Instance.new("TextLabel")
+Title.Name = "Title"
+Title.Size = UDim2.new(1, -40, 1, 0)
+Title.Position = UDim2.new(0, 10, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "LAJ HUB | Dead Rails Auto Farm"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 16
+Title.Font = Enum.Font.SourceSansBold
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TitleBar
+
+-- Close button
+local CloseButton = Instance.new("TextButton")
+CloseButton.Name = "CloseButton"
+CloseButton.Size = UDim2.new(0, 30, 0, 20)
+CloseButton.Position = UDim2.new(1, -35, 0, 5)
+CloseButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+CloseButton.Text = "X"
+CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseButton.TextSize = 14
+CloseButton.Font = Enum.Font.SourceSansBold
+CloseButton.BorderSizePixel = 0
+CloseButton.Parent = TitleBar
+
+-- Add rounded corners
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = MainFrame
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 8)
+TitleCorner.Parent = TitleBar
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 4)
+CloseCorner.Parent = CloseButton
+
+-- Content Frame
+local ContentFrame = Instance.new("Frame")
+ContentFrame.Name = "ContentFrame"
+ContentFrame.Size = UDim2.new(1, -20, 1, -40)
+ContentFrame.Position = UDim2.new(0, 10, 0, 35)
+ContentFrame.BackgroundTransparency = 1
+ContentFrame.Parent = MainFrame
+
+-- Status label
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Name = "StatusLabel"
+StatusLabel.Size = UDim2.new(1, 0, 0, 30)
+StatusLabel.Position = UDim2.new(0, 0, 0, 0)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Text = "Status: Idle"
+StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+StatusLabel.TextSize = 14
+StatusLabel.Font = Enum.Font.SourceSans
+StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+StatusLabel.Parent = ContentFrame
+
+-- Target label
+local TargetLabel = Instance.new("TextLabel")
+TargetLabel.Name = "TargetLabel"
+TargetLabel.Size = UDim2.new(1, 0, 0, 30)
+TargetLabel.Position = UDim2.new(0, 0, 0, 30)
+TargetLabel.BackgroundTransparency = 1
+TargetLabel.Text = "Target: None"
+TargetLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+TargetLabel.TextSize = 14
+TargetLabel.Font = Enum.Font.SourceSans
+TargetLabel.TextXAlignment = Enum.TextXAlignment.Left
+TargetLabel.Parent = ContentFrame
+
+-- Kills label
+local KillsLabel = Instance.new("TextLabel")
+KillsLabel.Name = "KillsLabel"
+KillsLabel.Size = UDim2.new(1, 0, 0, 30)
+KillsLabel.Position = UDim2.new(0, 0, 0, 60)
+KillsLabel.BackgroundTransparency = 1
+KillsLabel.Text = "Kills: 0"
+KillsLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+KillsLabel.TextSize = 14
+KillsLabel.Font = Enum.Font.SourceSans
+KillsLabel.TextXAlignment = Enum.TextXAlignment.Left
+KillsLabel.Parent = ContentFrame
+
+-- Create separator line
+local Separator = Instance.new("Frame")
+Separator.Name = "Separator"
+Separator.Size = UDim2.new(1, 0, 0, 1)
+Separator.Position = UDim2.new(0, 0, 0, 95)
+Separator.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+Separator.BorderSizePixel = 0
+Separator.Parent = ContentFrame
+
+-- Function to create a toggle button
+local function createToggle(name, position, defaultState, callback)
+    local Toggle = Instance.new("Frame")
+    Toggle.Name = name .. "Toggle"
+    Toggle.Size = UDim2.new(1, 0, 0, 30)
+    Toggle.Position = position
+    Toggle.BackgroundTransparency = 1
+    Toggle.Parent = ContentFrame
+    
+    local Label = Instance.new("TextLabel")
+    Label.Name = "Label"
+    Label.Size = UDim2.new(1, -50, 1, 0)
+    Label.BackgroundTransparency = 1
+    Label.Text = name
+    Label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Label.TextSize = 14
+    Label.Font = Enum.Font.SourceSans
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Parent = Toggle
+    
+    local Button = Instance.new("Frame")
+    Button.Name = "Button"
+    Button.Size = UDim2.new(0, 40, 0, 20)
+    Button.Position = UDim2.new(1, -45, 0, 5)
+    Button.BackgroundColor3 = defaultState and Color3.fromRGB(0, 170, 255) : Color3.fromRGB(100, 100, 100)
+    Button.BorderSizePixel = 0
+    Button.Parent = Toggle
+    
+    -- Add rounded corners to toggle button
+    local ButtonCorner = Instance.new("UICorner")
+    ButtonCorner.CornerRadius = UDim.new(0, 10)
+    ButtonCorner.Parent = Button
+    
+    -- Create the circle indicator
+    local Circle = Instance.new("Frame")
+    Circle.Name = "Circle"
+    Circle.Size = UDim2.new(0, 16, 0, 16)
+    Circle.Position = defaultState and UDim2.new(1, -18, 0, 2) or UDim2.new(0, 2, 0, 2)
+    Circle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    Circle.BorderSizePixel = 0
+    Circle.Parent = Button
+    
+    -- Add rounded corners to circle
+    local CircleCorner = Instance.new("UICorner")
+    CircleCorner.CornerRadius = UDim.new(1, 0)
+    CircleCorner.Parent = Circle
+    
+    -- Initial state
+    local state = defaultState
+    
+    -- Make the whole toggle clickable
+    local ToggleButton = Instance.new("TextButton")
+    ToggleButton.Name = "ToggleButton"
+    ToggleButton.Size = UDim2.new(1, 0, 1, 0)
+    ToggleButton.BackgroundTransparency = 1
+    ToggleButton.Text = ""
+    ToggleButton.Parent = Toggle
+    
+    -- Click handling
+    ToggleButton.MouseButton1Click:Connect(function()
+        state = not state
+        Button.BackgroundColor3 = state and Color3.fromRGB(0, 170, 255) or Color3.fromRGB(100, 100, 100)
+        if state then
+            Circle:TweenPosition(UDim2.new(1, -18, 0, 2), "Out", "Sine", 0.1, true)
+        else
+            Circle:TweenPosition(UDim2.new(0, 2, 0, 2), "Out", "Sine", 0.1, true)
+        end
+        callback(state)
+    end)
+    
+    return Toggle, function() return state end
+end
+
+-- Create main toggle for auto farm
+local autoFarmToggle, getAutoFarmState = createToggle("Auto Farm", UDim2.new(0, 0, 0, 100), false, function(state)
+    AutoFarmEnabled = state
+    StatusLabel.Text = state and "Status: Running" or "Status: Idle"
+    
+    if state then
+        -- Start auto farm
+        originalPos = HumanoidRootPart.Position
+        originalCF = HumanoidRootPart.CFrame
+        startAutoFarm()
+    else
+        -- Stop auto farm
+        stopAutoFarm()
+    end
+end)
+
+-- Create additional toggles
+local autoShootToggle, getAutoShootState = createToggle("Auto Shoot", UDim2.new(0, 0, 0, 135), true, function(state)
+    AutoShootEnabled = state
+end)
+
+local autoRespawnToggle, getAutoRespawnState = createToggle("Auto Respawn", UDim2.new(0, 0, 0, 170), true, function(state)
+    AutoRespawnEnabled = state
+end)
+
+local teleportToggle, getTeleportState = createToggle("Teleport to Targets", UDim2.new(0, 0, 0, 205), false, function(state)
+    TeleportToTargetsEnabled = state
+end)
+
+local targetAllToggle, getTargetAllState = createToggle("Target All Players", UDim2.new(0, 0, 0, 240), true, function(state)
+    TargetAll = state
+end)
+
+local avoidDamageToggle, getAvoidDamageState = createToggle("Avoid Damage", UDim2.new(0, 0, 0, 275), false, function(state)
+    AvoidDamageEnabled = state
+end)
+
+-- Function to get the nearest valid target
+local function getNearestTarget()
+    local nearestDistance = farmRadius
+    local nearest = nil
+    
+    local myTeam = LocalPlayer.Team
+    
+    -- Try to find targets in workspace
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChild("Humanoid") then
+            -- Skip teammates if not targeting all
+            if not TargetAll and player.Team == myTeam then
+                continue
+            end
+            
+            -- Check if target is alive
+            if player.Character.Humanoid.Health <= 0 then
+                continue
+            end
+            
+            local targetHRP = player.Character.HumanoidRootPart
+            local distance = (HumanoidRootPart.Position - targetHRP.Position).Magnitude
+            
+            if distance < nearestDistance then
+                nearestDistance = distance
+                nearest = player.Character
+            end
+        end
+    end
+    
+    -- Try to find NPCs/Zombies in workspace (common patterns in games like Dead Rails)
+    local npcs = workspace:FindFirstChild("Zombies") or workspace:FindFirstChild("NPCs") or workspace:FindFirstChild("Enemies")
+    if npcs then
+        for _, npc in pairs(npcs:GetChildren()) do
+            if npc:FindFirstChild("HumanoidRootPart") and npc:FindFirstChild("Humanoid") and npc.Humanoid.Health > 0 then
+                local distance = (HumanoidRootPart.Position - npc.HumanoidRootPart.Position).Magnitude
+                
+                if distance < nearestDistance then
+                    nearestDistance = distance
+                    nearest = npc
+                end
+            end
+        end
+    end
+    
+    return nearest, nearestDistance
+end
+
+-- Function to aim at a target
+local function aimAtTarget(target)
+    if not target or not target:FindFirstChild("HumanoidRootPart") then return end
+    
+    local targetPos = target.HumanoidRootPart.Position
+    -- Aim for the head if available, otherwise use HumanoidRootPart
+    if target:FindFirstChild("Head") then
+        targetPos = target.Head.Position
+    end
+    
+    -- Calculate direction to target
+    local lookVector = (targetPos - Character.Head.Position).Unit
+    
+    -- Set character to look at target
+    HumanoidRootPart.CFrame = CFrame.new(HumanoidRootPart.Position, HumanoidRootPart.Position + lookVector)
+    
+    return targetPos
+end
+
+-- Function to shoot at a target
+local function shootAtTarget()
+    if not AutoShootEnabled then return end
+    
+    -- Only shoot if cooldown has passed
+    local currentTime = tick()
+    if currentTime - lastShotTime < shotCooldown then
+        return
+    end
+    
+    -- Find the equipped weapon
+    local tool = Character:FindFirstChildOfClass("Tool")
+    if not tool then return end
+    
+    -- Different games have different shooting mechanisms, try common methods
+    -- Method 1: Activate tool
+    tool:Activate()
+    
+    -- Method 2: Fire remote event (common in Roblox FPS games)
+    local fireEvent = tool:FindFirstChild("Fire") or tool:FindFirstChild("ShootEvent") or tool:FindFirstChild("Shoot")
+    if fireEvent and fireEvent:IsA("RemoteEvent") then
+        fireEvent:FireServer()
+    end
+    
+    -- Method 3: Trigger mouse button input
+    -- This is simulated by firing to a server event
+    if ReplicatedStorage:FindFirstChild("Events") then
+        local shootEvent = ReplicatedStorage.Events:FindFirstChild("ShootEvent") or ReplicatedStorage.Events:FindFirstChild("FireEvent")
+        if shootEvent and shootEvent:IsA("RemoteEvent") then
+            shootEvent:FireServer()
+        end
+    end
+    
+    lastShotTime = currentTime
+end
+
+-- Function to handle respawning
+local function handleRespawn()
+    if not AutoRespawnEnabled then return end
+    
+    if Character and Character:FindFirstChild("Humanoid") and Character.Humanoid.Health <= 0 then
+        wait(1) -- Wait a bit before respawning
+        
+        -- Try common respawn methods
+        -- Method 1: Character respawn
+        local respawnRemote = ReplicatedStorage:FindFirstChild("Respawn") or ReplicatedStorage:FindFirstChild("RespawnEvent")
+        if respawnRemote and respawnRemote:IsA("RemoteEvent") then
+            respawnRemote:FireServer()
+        end
+        
+        -- Method 2: Player respawn
+        local playerScripts = LocalPlayer:FindFirstChild("PlayerScripts")
+        if playerScripts then
+            local respawnScript = playerScripts:FindFirstChild("Respawn") or playerScripts:FindFirstChild("RespawnScript")
+            if respawnScript and respawnScript:IsA("LocalScript") then
+                -- Can't call directly, but can sometimes trigger via events
+                wait(1)
+            end
+        end
+        
+        -- Method 3: Last resort - reset character
+        if Humanoid.Health <= 0 then
+            game:GetService("StarterGui"):SetCore("ResetButtonCallback", true)
+            wait(0.1)
+            game:GetService("StarterGui"):SetCore("ResetButtonCallback", false)
+        end
+    end
+end
+
+-- Function to handle avoiding damage (teleporting away when health is low)
+local function handleAvoidDamage()
+    if not AvoidDamageEnabled then return end
+    
+    if Character and Character:FindFirstChild("Humanoid") and Character.Humanoid.Health < Character.Humanoid.MaxHealth * 0.3 then
+        -- Health is below 30%, retreat temporarily
+        StatusLabel.Text = "Status: Retreating (Low Health)"
+        
+        -- Teleport to a safe distance away from target
+        if nearestTarget and nearestTarget:FindFirstChild("HumanoidRootPart") then
+            local targetPos = nearestTarget.HumanoidRootPart.Position
+            local retreatDir = (HumanoidRootPart.Position - targetPos).Unit
+            local retreatPos = targetPos + (retreatDir * 50) -- 50 studs away
+            
+            -- Try to teleport
+            HumanoidRootPart.CFrame = CFrame.new(retreatPos)
+            wait(3) -- Wait for health to recover
+            StatusLabel.Text = "Status: Running"
+        end
+    end
+end
+
+-- Function to start auto farm
+function startAutoFarm()
+    if autoFarmConnection then return end
+    
+    local killCount = 0
+    
+    autoFarmConnection = RunService.Heartbeat:Connect(function()
+        -- Update Character reference if needed
+        if not Character or not Character:FindFirstChild("HumanoidRootPart") then
+            Character = LocalPlayer.Character
+            if Character then
+                Humanoid = Character:FindFirstChild("Humanoid")
+                HumanoidRootPart = Character:FindFirstChild("HumanoidRootPart")
+            end
+            return
+        end
+        
+        -- Handle respawning if character is dead
+        if Character and Character:FindFirstChild("Humanoid") and Character.Humanoid.Health <= 0 then
+            handleRespawn()
+            return
+        end
+        
+        -- Refresh target periodically
+        local currentTime = tick()
+        if currentTime - lastTargetRefresh > targetRefreshRate then
+            nearestTarget, targetDistance = getNearestTarget()
+            lastTargetRefresh = currentTime
+            
+            -- Update target display
+            if nearestTarget then
+                local targetName = nearestTarget.Name
+                TargetLabel.Text = "Target: " .. targetName .. " (" .. math.floor(targetDistance) .. " studs)"
+            else
+                TargetLabel.Text = "Target: None"
+            end
+        end
+        
+        -- Check if we have a valid target
+        if nearestTarget and nearestTarget:FindFirstChild("HumanoidRootPart") and nearestTarget:FindFirstChild("Humanoid") then
+            -- Check if target is still alive
+            if nearestTarget.Humanoid.Health <= 0 then
+                killCount = killCount + 1
+                KillsLabel.Text = "Kills: " .. killCount
+                nearestTarget = nil
+                return
+            end
+            
+            -- Handle avoiding damage if health is low
+            handleAvoidDamage()
+            
+            -- Teleport to target if enabled
+            if TeleportToTargetsEnabled then
+                local targetPos = nearestTarget.HumanoidRootPart.Position
+                -- Teleport behind the target slightly
+                local targetCF = nearestTarget.HumanoidRootPart.CFrame
+                local behindPos = targetCF.Position - (targetCF.LookVector * 5)
+                
+                if (HumanoidRootPart.Position - behindPos).Magnitude > 10 then
+                    HumanoidRootPart.CFrame = CFrame.new(behindPos, targetPos)
+                end
+            end
+            
+            -- Aim at the target
+            local targetPos = aimAtTarget(nearestTarget)
+            
+            -- Shoot at the target
+            shootAtTarget()
+        else
+            -- Look for a new target
+            StatusLabel.Text = "Status: Searching for targets"
+        end
+    end)
+end
+
+-- Function to stop auto farm
+function stopAutoFarm()
+    if autoFarmConnection then
+        autoFarmConnection:Disconnect()
+        autoFarmConnection = nil
+    end
+    
+    -- Reset position if needed
+    if originalCF and HumanoidRootPart then
+        HumanoidRootPart.CFrame = originalCF
+    end
+end
+
+-- Close button functionality
+CloseButton.MouseButton1Click:Connect(function()
+    stopAutoFarm()
+    ScreenGui:Destroy()
+end)
+
+-- Character respawn handling
+LocalPlayer.CharacterAdded:Connect(function(newCharacter)
+    Character = newCharacter
+    Humanoid = newCharacter:WaitForChild("Humanoid")
+    HumanoidRootPart = newCharacter:WaitForChild("HumanoidRootPart")
+    
+    -- If auto farm is still enabled, restart it after a brief delay
+    if AutoFarmEnabled then
+        wait(1)
+        startAutoFarm()
+    end
+end)
+
+-- Notification on load
+game:GetService("StarterGui"):SetCore("SendNotification", {
+    Title = "LAJ HUB | Dead Rails",
+    Text = "Auto Farm loaded successfully!",
+    Duration = 5
+})
+
+print("LAJ HUB Dead Rails Auto Farm Loaded")
