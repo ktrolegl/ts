@@ -1,541 +1,1389 @@
--- First load the anticheat bypass
-loadstring(game:HttpGet("https://raw.githubusercontent.com/AmareScripts/DeadRails/refs/heads/main/Bypass%25AntiCheat.lua"))()
+--[[
+    LAJ HUB - Blue Lock Rivals Script
+    Game: Blue Lock Rivals (Roblox)
+    
+    Features:
+    - Ball ESP with tracking
+    - Auto farm with optimized scoring
+    - Auto goal scoring with direct shot
+    - Auto steal from opponents
+    - Auto teleport to ball with collision avoidance
+    - Auto join team features
+    - Auto goalkeeper with ball trajectory prediction
+    - Fly mode with adjustable speed
+    - Anti-AFK
+]]
 
--- LAJ HUB Dead Rails Auto Farm Script
--- This script automates farming in Dead Rails
-
+-- Services
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local LocalPlayer = Players.LocalPlayer
-local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-local Humanoid = Character:WaitForChild("Humanoid")
-local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+local VirtualUser = game:GetService("VirtualUser")
 
--- Configuration
-local AutoFarmEnabled = false
-local AutoShootEnabled = false
-local AutoRespawnEnabled = false
-local AutoSprintEnabled = false
-local AutoReloadEnabled = false
-local TeleportToTargetsEnabled = false
-local AvoidDamageEnabled = false
-local TargetAll = true -- If false, will only target NPCs/Zombies
+-- Local variables
+local player = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+local GameValues = ReplicatedStorage:WaitForChild("GameValues")
+local GoalsFolder = Workspace:WaitForChild("Goals")
+local AwayGoal = GoalsFolder:WaitForChild("Away")
+local HomeGoal = GoalsFolder:WaitForChild("Home")
 
--- Target finding variables
-local nearestTarget = nil
-local targetDistance = math.huge
-local targetRefreshRate = 0.2 -- How often to refresh target list
-local lastTargetRefresh = 0
-local farmRadius = 500 -- Max distance to consider targets
+-- Remote events
+local ballServiceRemote = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Knit"):WaitForChild("Services"):WaitForChild("BallService"):WaitForChild("RE"):WaitForChild("Shoot")
+local slideRemote = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Knit"):WaitForChild("Services"):WaitForChild("BallService"):WaitForChild("RE"):WaitForChild("Slide")
+local dribbleRemote = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Knit"):WaitForChild("Services"):WaitForChild("BallService"):WaitForChild("RE"):WaitForChild("Dribble")
 
--- Other variables
-local autoFarmConnection = nil
-local lastShotTime = 0
-local shotCooldown = 0.1 -- Time between shots
-local originalPos = nil
-local originalCF = nil
+-- Character references (will be updated when character changes)
+local character = nil
+local rootPart = nil 
+local humanoid = nil
 
--- Create GUI
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "LAJAutoFarmGUI"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = game.CoreGui
+-- Positions and CFrames
+local homeGoalPosition = Vector3.new(325, 20, -49)
+local awayGoalPosition = Vector3.new(-247, 18, -50)
+local homeGoalCFrame = CFrame.new(-242.376602, 10.8505239, -49.222084)
+local awayGoalCFrame = CFrame.new(319.823425, 10.8505239, -49.222084)
 
--- Main Frame
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 250, 0, 350)
-MainFrame.Position = UDim2.new(0, 20, 0.5, -175)
-MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-MainFrame.BorderSizePixel = 0
-MainFrame.Active = true
-MainFrame.Draggable = true
-MainFrame.Parent = ScreenGui
+-- Feature toggles
+local FootballESPEnabled = false
+local autofarmEnabled = false
+local autoGoalEnabled = false
+local autoStealEnabled = false
+local autoTPBallEnabled = false
+local autoJoinRandomTeamEnabled = false
+local autoJoinHomeEnabled = false
+local autoJoinAwayEnabled = false
+local autoTPEnabled = false
+local autoTPHomeEnabled = false
+local autoTPAwayEnabled = false
+local autoDribbleEnabled = false
+local autoGoalKeeperEnabled = false
+local autoBringEnabled = false
+local tpBallToYouEnabled = false
+local flying = false
+local noCDEnabled = false
+local antiRagdoll = false
+local antiAFKEnabled = false
+local aimlockEnabled = false
 
--- Title bar
-local TitleBar = Instance.new("Frame")
-TitleBar.Name = "TitleBar"
-TitleBar.Size = UDim2.new(1, 0, 0, 30)
-TitleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-TitleBar.BorderSizePixel = 0
-TitleBar.Parent = MainFrame
+-- Team and role information
+local roles = {"CF", "GK", "LW", "RW", "CM"}
+local nonGKRoles = {"CF", "LW", "RW", "CM"}
+local teams = {"Home", "Away"}
+local selectedTeam = "Home"
+local selectedRole = "CF"
 
-local Title = Instance.new("TextLabel")
-Title.Name = "Title"
-Title.Size = UDim2.new(1, -40, 1, 0)
-Title.Position = UDim2.new(0, 10, 0, 0)
-Title.BackgroundTransparency = 1
-Title.Text = "LAJ HUB | Dead Rails Auto Farm"
-Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.TextSize = 16
-Title.Font = Enum.Font.SourceSansBold
-Title.TextXAlignment = Enum.TextXAlignment.Left
-Title.Parent = TitleBar
+-- Configuration values
+local flySpeed = 100
+local maxFlySpeed = 1000
+local speedIncrement = 0.4
+local originalGravity = workspace.Gravity
+local predictionDistance = 0.1
 
--- Close button
-local CloseButton = Instance.new("TextButton")
-CloseButton.Name = "CloseButton"
-CloseButton.Size = UDim2.new(0, 30, 0, 20)
-CloseButton.Position = UDim2.new(1, -35, 0, 5)
-CloseButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-CloseButton.Text = "X"
-CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-CloseButton.TextSize = 14
-CloseButton.Font = Enum.Font.SourceSansBold
-CloseButton.BorderSizePixel = 0
-CloseButton.Parent = TitleBar
+-- ESP objects
+local Lines = {}
+local Quads = {}
+local lastBallPosition = nil
 
--- Add rounded corners
-local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0, 8)
-UICorner.Parent = MainFrame
+-- Connection storage for cleanup
+local runningTasks = {}
+local connections = {}
 
-local TitleCorner = Instance.new("UICorner")
-TitleCorner.CornerRadius = UDim.new(0, 8)
-TitleCorner.Parent = TitleBar
+---------------------------
+-- Utility Functions
+---------------------------
 
-local CloseCorner = Instance.new("UICorner")
-CloseCorner.CornerRadius = UDim.new(0, 4)
-CloseCorner.Parent = CloseButton
+-- Update character references when they change
+local function updateCharacterReferences()
+    character = player.Character or player.CharacterAdded:Wait()
+    if character then
+        rootPart = character:WaitForChild("HumanoidRootPart", 3)
+        humanoid = character:WaitForChild("Humanoid", 3)
+    end
+end
 
--- Content Frame
-local ContentFrame = Instance.new("Frame")
-ContentFrame.Name = "ContentFrame"
-ContentFrame.Size = UDim2.new(1, -20, 1, -40)
-ContentFrame.Position = UDim2.new(0, 10, 0, 35)
-ContentFrame.BackgroundTransparency = 1
-ContentFrame.Parent = MainFrame
+-- Wait for character to be fully loaded
+local function waitForCharacter()
+    if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+        player.CharacterAdded:Wait()
+        task.wait(1) -- Wait for character to fully load
+    end
+    updateCharacterReferences()
+    return character, rootPart
+end
 
--- Status label
-local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Name = "StatusLabel"
-StatusLabel.Size = UDim2.new(1, 0, 0, 30)
-StatusLabel.Position = UDim2.new(0, 0, 0, 0)
-StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = "Status: Idle"
-StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-StatusLabel.TextSize = 14
-StatusLabel.Font = Enum.Font.SourceSans
-StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-StatusLabel.Parent = ContentFrame
+-- Check if player is in a game team
+local function checkTeam()
+    local team = player.Team
+    return team and team.Name ~= "Visitor"
+end
 
--- Target label
-local TargetLabel = Instance.new("TextLabel")
-TargetLabel.Name = "TargetLabel"
-TargetLabel.Size = UDim2.new(1, 0, 0, 30)
-TargetLabel.Position = UDim2.new(0, 0, 0, 30)
-TargetLabel.BackgroundTransparency = 1
-TargetLabel.Text = "Target: None"
-TargetLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-TargetLabel.TextSize = 14
-TargetLabel.Font = Enum.Font.SourceSans
-TargetLabel.TextXAlignment = Enum.TextXAlignment.Left
-TargetLabel.Parent = ContentFrame
+-- Check if player has the ball
+local function hasBall()
+    if not character then return false end
+    return character:FindFirstChild("Football") ~= nil
+end
 
--- Kills label
-local KillsLabel = Instance.new("TextLabel")
-KillsLabel.Name = "KillsLabel"
-KillsLabel.Size = UDim2.new(1, 0, 0, 30)
-KillsLabel.Position = UDim2.new(0, 0, 0, 60)
-KillsLabel.BackgroundTransparency = 1
-KillsLabel.Text = "Kills: 0"
-KillsLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-KillsLabel.TextSize = 14
-KillsLabel.Font = Enum.Font.SourceSans
-KillsLabel.TextXAlignment = Enum.TextXAlignment.Left
-KillsLabel.Parent = ContentFrame
+-- Check if game is in playing state
+local function IsInGame()
+    return GameValues.State.Value == "Playing"
+end
 
--- Create separator line
-local Separator = Instance.new("Frame")
-Separator.Name = "Separator"
-Separator.Size = UDim2.new(1, 0, 0, 1)
-Separator.Position = UDim2.new(0, 0, 0, 95)
-Separator.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-Separator.BorderSizePixel = 0
-Separator.Parent = ContentFrame
+-- Check if a goal was just scored
+local function IsScored()
+    return GameValues.Scored.Value
+end
 
--- Function to create a toggle button
-local function createToggle(name, position, defaultState, callback)
-    local Toggle = Instance.new("Frame")
-    Toggle.Name = name .. "Toggle"
-    Toggle.Size = UDim2.new(1, 0, 0, 30)
-    Toggle.Position = position
-    Toggle.BackgroundTransparency = 1
-    Toggle.Parent = ContentFrame
+-- Check if player is on visitor team
+local function IsVisitor()
+    if not player.Team then return true end
+    return player.Team.Name == "Visitor"
+end
+
+-- Get the ball
+local function getBall()
+    return Workspace:FindFirstChild("Football")
+end
+
+-- Safely spawn a task with error handling
+local function safeSpawn(func)
+    local taskId = #runningTasks + 1
+    runningTasks[taskId] = true
     
-    local Label = Instance.new("TextLabel")
-    Label.Name = "Label"
-    Label.Size = UDim2.new(1, -50, 1, 0)
-    Label.BackgroundTransparency = 1
-    Label.Text = name
-    Label.TextColor3 = Color3.fromRGB(255, 255, 255)
-    Label.TextSize = 14
-    Label.Font = Enum.Font.SourceSans
-    Label.TextXAlignment = Enum.TextXAlignment.Left
-    Label.Parent = Toggle
-    
-    local Button = Instance.new("Frame")
-    Button.Name = "Button"
-    Button.Size = UDim2.new(0, 40, 0, 20)
-    Button.Position = UDim2.new(1, -45, 0, 5)
-    Button.BackgroundColor3 = defaultState and Color3.fromRGB(0, 170, 255) : Color3.fromRGB(100, 100, 100)
-    Button.BorderSizePixel = 0
-    Button.Parent = Toggle
-    
-    -- Add rounded corners to toggle button
-    local ButtonCorner = Instance.new("UICorner")
-    ButtonCorner.CornerRadius = UDim.new(0, 10)
-    ButtonCorner.Parent = Button
-    
-    -- Create the circle indicator
-    local Circle = Instance.new("Frame")
-    Circle.Name = "Circle"
-    Circle.Size = UDim2.new(0, 16, 0, 16)
-    Circle.Position = defaultState and UDim2.new(1, -18, 0, 2) or UDim2.new(0, 2, 0, 2)
-    Circle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    Circle.BorderSizePixel = 0
-    Circle.Parent = Button
-    
-    -- Add rounded corners to circle
-    local CircleCorner = Instance.new("UICorner")
-    CircleCorner.CornerRadius = UDim.new(1, 0)
-    CircleCorner.Parent = Circle
-    
-    -- Initial state
-    local state = defaultState
-    
-    -- Make the whole toggle clickable
-    local ToggleButton = Instance.new("TextButton")
-    ToggleButton.Name = "ToggleButton"
-    ToggleButton.Size = UDim2.new(1, 0, 1, 0)
-    ToggleButton.BackgroundTransparency = 1
-    ToggleButton.Text = ""
-    ToggleButton.Parent = Toggle
-    
-    -- Click handling
-    ToggleButton.MouseButton1Click:Connect(function()
-        state = not state
-        Button.BackgroundColor3 = state and Color3.fromRGB(0, 170, 255) or Color3.fromRGB(100, 100, 100)
-        if state then
-            Circle:TweenPosition(UDim2.new(1, -18, 0, 2), "Out", "Sine", 0.1, true)
-        else
-            Circle:TweenPosition(UDim2.new(0, 2, 0, 2), "Out", "Sine", 0.1, true)
+    task.spawn(function()
+        local success, result = pcall(function()
+            func(taskId)
+        end)
+        
+        if not success then
+            warn("Error in task: " .. tostring(result))
         end
-        callback(state)
+        
+        runningTasks[taskId] = nil
     end)
     
-    return Toggle, function() return state end
+    return taskId
 end
 
--- Create main toggle for auto farm
-local autoFarmToggle, getAutoFarmState = createToggle("Auto Farm", UDim2.new(0, 0, 0, 100), false, function(state)
-    AutoFarmEnabled = state
-    StatusLabel.Text = state and "Status: Running" or "Status: Idle"
-    
-    if state then
-        -- Start auto farm
-        originalPos = HumanoidRootPart.Position
-        originalCF = HumanoidRootPart.CFrame
-        startAutoFarm()
-    else
-        -- Stop auto farm
-        stopAutoFarm()
+-- Cancel a running task
+local function cancelTask(taskId)
+    if runningTasks[taskId] then
+        runningTasks[taskId] = nil
     end
-end)
+end
 
--- Create additional toggles
-local autoShootToggle, getAutoShootState = createToggle("Auto Shoot", UDim2.new(0, 0, 0, 135), true, function(state)
-    AutoShootEnabled = state
-end)
+-- Check if a task should continue running
+local function taskShouldRun(taskId)
+    return runningTasks[taskId] ~= nil
+end
 
-local autoRespawnToggle, getAutoRespawnState = createToggle("Auto Respawn", UDim2.new(0, 0, 0, 170), true, function(state)
-    AutoRespawnEnabled = state
-end)
+-- Helper to randomize values slightly
+local function randomizeValue(value, range)
+    return value + (value * (math.random(-range, range) / 100))
+end
 
-local teleportToggle, getTeleportState = createToggle("Teleport to Targets", UDim2.new(0, 0, 0, 205), false, function(state)
-    TeleportToTargetsEnabled = state
-end)
+---------------------------
+-- ESP Functions
+---------------------------
 
-local targetAllToggle, getTargetAllState = createToggle("Target All Players", UDim2.new(0, 0, 0, 240), true, function(state)
-    TargetAll = state
-end)
+-- Clear all ESP drawings
+local function ClearESP()
+    for _, line in pairs(Lines) do
+        if line then line:Remove() end
+    end
+    Lines = {}
 
-local avoidDamageToggle, getAvoidDamageState = createToggle("Avoid Damage", UDim2.new(0, 0, 0, 275), false, function(state)
-    AvoidDamageEnabled = state
-end)
+    for _, quad in pairs(Quads) do
+        if quad then quad:Remove() end
+    end
+    Quads = {}
+end
 
--- Function to get the nearest valid target
-local function getNearestTarget()
-    local nearestDistance = farmRadius
-    local nearest = nil
-    
-    local myTeam = LocalPlayer.Team
-    
-    -- Try to find targets in workspace
-    for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChild("Humanoid") then
-            -- Skip teammates if not targeting all
-            if not TargetAll and player.Team == myTeam then
-                continue
-            end
-            
-            -- Check if target is alive
-            if player.Character.Humanoid.Health <= 0 then
-                continue
-            end
-            
-            local targetHRP = player.Character.HumanoidRootPart
-            local distance = (HumanoidRootPart.Position - targetHRP.Position).Magnitude
-            
-            if distance < nearestDistance then
-                nearestDistance = distance
-                nearest = player.Character
+-- Draw a 3D line on screen
+local function DrawLine(From, To)
+    local FromScreen, FromVisible = Camera:WorldToViewportPoint(From)
+    local ToScreen, ToVisible = Camera:WorldToViewportPoint(To)
+
+    if not (FromVisible or ToVisible) then return end
+
+    local FromPos = Vector2.new(FromScreen.X, FromScreen.Y)
+    local ToPos = Vector2.new(ToScreen.X, ToScreen.Y)
+
+    local Line = Drawing.new("Line")
+    Line.Thickness = 1
+    Line.From = FromPos
+    Line.To = ToPos
+    Line.Color = Color3.fromRGB(255, 255, 255)
+    Line.Transparency = 1
+    Line.Visible = true
+
+    table.insert(Lines, Line)
+end
+
+-- Draw a 3D quad on screen
+local function DrawQuad(PosA, PosB, PosC, PosD)
+    local PosAScreen, PosAVisible = Camera:WorldToViewportPoint(PosA)
+    local PosBScreen, PosBVisible = Camera:WorldToViewportPoint(PosB)
+    local PosCScreen, PosCVisible = Camera:WorldToViewportPoint(PosC)
+    local PosDScreen, PosDVisible = Camera:WorldToViewportPoint(PosD)
+
+    if not (PosAVisible or PosBVisible or PosCVisible or PosDVisible) then return end
+
+    local Quad = Drawing.new("Quad")
+    Quad.PointA = Vector2.new(PosAScreen.X, PosAScreen.Y)
+    Quad.PointB = Vector2.new(PosBScreen.X, PosBScreen.Y)
+    Quad.PointC = Vector2.new(PosCScreen.X, PosCScreen.Y)
+    Quad.PointD = Vector2.new(PosDScreen.X, PosDScreen.Y)
+    Quad.Color = Color3.fromRGB(255, 255, 255)
+    Quad.Thickness = 0.5
+    Quad.Filled = true
+    Quad.Transparency = 0.25
+    Quad.Visible = true
+
+    table.insert(Quads, Quad)
+end
+
+-- Get corners of a part for ESP
+local function GetCorners(Part)
+    local CF, Size = Part.CFrame, Part.Size / 2
+    local Corners = {}
+
+    for X = -1, 1, 2 do
+        for Y = -1, 1, 2 do
+            for Z = -1, 1, 2 do
+                table.insert(Corners, (CF * CFrame.new(Size * Vector3.new(X, Y, Z))).Position)
             end
         end
     end
+
+    return Corners
+end
+
+-- Draw ESP for the football
+local function DrawFootballESP(Football)
+    local Corners = GetCorners(Football)
+
+    -- Check if ball position has changed significantly to redraw
+    if lastBallPosition and (lastBallPosition - Football.Position).Magnitude < 0.1 then
+        return -- Ball hasn't moved much, no need to redraw
+    end
     
-    -- Try to find NPCs/Zombies in workspace (common patterns in games like Dead Rails)
-    local npcs = workspace:FindFirstChild("Zombies") or workspace:FindFirstChild("NPCs") or workspace:FindFirstChild("Enemies")
-    if npcs then
-        for _, npc in pairs(npcs:GetChildren()) do
-            if npc:FindFirstChild("HumanoidRootPart") and npc:FindFirstChild("Humanoid") and npc.Humanoid.Health > 0 then
-                local distance = (HumanoidRootPart.Position - npc.HumanoidRootPart.Position).Magnitude
-                
-                if distance < nearestDistance then
-                    nearestDistance = distance
-                    nearest = npc
-                end
-            end
+    lastBallPosition = Football.Position
+    
+    -- Clear old drawings when redrawing
+    ClearESP()
+
+    -- Draw lines connecting corners
+    DrawLine(Corners[1], Corners[2])
+    DrawLine(Corners[2], Corners[4])
+    DrawLine(Corners[4], Corners[3])
+    DrawLine(Corners[3], Corners[1])
+
+    DrawLine(Corners[5], Corners[6])
+    DrawLine(Corners[6], Corners[8])
+    DrawLine(Corners[8], Corners[7])
+    DrawLine(Corners[7], Corners[5])
+
+    DrawLine(Corners[1], Corners[5])
+    DrawLine(Corners[2], Corners[6])
+    DrawLine(Corners[3], Corners[7])
+    DrawLine(Corners[4], Corners[8])
+
+    -- Draw quads for faces
+    DrawQuad(Corners[1], Corners[2], Corners[6], Corners[5])
+    DrawQuad(Corners[3], Corners[4], Corners[8], Corners[7])
+    DrawQuad(Corners[1], Corners[3], Corners[7], Corners[5])
+    DrawQuad(Corners[2], Corners[4], Corners[8], Corners[6])
+end
+
+-- Main ESP function
+local function FootballESP()
+    if not FootballESPEnabled then
+        if #Lines > 0 or #Quads > 0 then
+            ClearESP()
+            lastBallPosition = nil
         end
-    end
-    
-    return nearest, nearestDistance
-end
-
--- Function to aim at a target
-local function aimAtTarget(target)
-    if not target or not target:FindFirstChild("HumanoidRootPart") then return end
-    
-    local targetPos = target.HumanoidRootPart.Position
-    -- Aim for the head if available, otherwise use HumanoidRootPart
-    if target:FindFirstChild("Head") then
-        targetPos = target.Head.Position
-    end
-    
-    -- Calculate direction to target
-    local lookVector = (targetPos - Character.Head.Position).Unit
-    
-    -- Set character to look at target
-    HumanoidRootPart.CFrame = CFrame.new(HumanoidRootPart.Position, HumanoidRootPart.Position + lookVector)
-    
-    return targetPos
-end
-
--- Function to shoot at a target
-local function shootAtTarget()
-    if not AutoShootEnabled then return end
-    
-    -- Only shoot if cooldown has passed
-    local currentTime = tick()
-    if currentTime - lastShotTime < shotCooldown then
         return
     end
-    
-    -- Find the equipped weapon
-    local tool = Character:FindFirstChildOfClass("Tool")
-    if not tool then return end
-    
-    -- Different games have different shooting mechanisms, try common methods
-    -- Method 1: Activate tool
-    tool:Activate()
-    
-    -- Method 2: Fire remote event (common in Roblox FPS games)
-    local fireEvent = tool:FindFirstChild("Fire") or tool:FindFirstChild("ShootEvent") or tool:FindFirstChild("Shoot")
-    if fireEvent and fireEvent:IsA("RemoteEvent") then
-        fireEvent:FireServer()
-    end
-    
-    -- Method 3: Trigger mouse button input
-    -- This is simulated by firing to a server event
-    if ReplicatedStorage:FindFirstChild("Events") then
-        local shootEvent = ReplicatedStorage.Events:FindFirstChild("ShootEvent") or ReplicatedStorage.Events:FindFirstChild("FireEvent")
-        if shootEvent and shootEvent:IsA("RemoteEvent") then
-            shootEvent:FireServer()
-        end
-    end
-    
-    lastShotTime = currentTime
-end
 
--- Function to handle respawning
-local function handleRespawn()
-    if not AutoRespawnEnabled then return end
-    
-    if Character and Character:FindFirstChild("Humanoid") and Character.Humanoid.Health <= 0 then
-        wait(1) -- Wait a bit before respawning
-        
-        -- Try common respawn methods
-        -- Method 1: Character respawn
-        local respawnRemote = ReplicatedStorage:FindFirstChild("Respawn") or ReplicatedStorage:FindFirstChild("RespawnEvent")
-        if respawnRemote and respawnRemote:IsA("RemoteEvent") then
-            respawnRemote:FireServer()
-        end
-        
-        -- Method 2: Player respawn
-        local playerScripts = LocalPlayer:FindFirstChild("PlayerScripts")
-        if playerScripts then
-            local respawnScript = playerScripts:FindFirstChild("Respawn") or playerScripts:FindFirstChild("RespawnScript")
-            if respawnScript and respawnScript:IsA("LocalScript") then
-                -- Can't call directly, but can sometimes trigger via events
-                wait(1)
-            end
-        end
-        
-        -- Method 3: Last resort - reset character
-        if Humanoid.Health <= 0 then
-            game:GetService("StarterGui"):SetCore("ResetButtonCallback", true)
-            wait(0.1)
-            game:GetService("StarterGui"):SetCore("ResetButtonCallback", false)
-        end
+    local Football = getBall()
+    if Football and Football:IsA("BasePart") then
+        DrawFootballESP(Football)
     end
 end
 
--- Function to handle avoiding damage (teleporting away when health is low)
-local function handleAvoidDamage()
-    if not AvoidDamageEnabled then return end
-    
-    if Character and Character:FindFirstChild("Humanoid") and Character.Humanoid.Health < Character.Humanoid.MaxHealth * 0.3 then
-        -- Health is below 30%, retreat temporarily
-        StatusLabel.Text = "Status: Retreating (Low Health)"
-        
-        -- Teleport to a safe distance away from target
-        if nearestTarget and nearestTarget:FindFirstChild("HumanoidRootPart") then
-            local targetPos = nearestTarget.HumanoidRootPart.Position
-            local retreatDir = (HumanoidRootPart.Position - targetPos).Unit
-            local retreatPos = targetPos + (retreatDir * 50) -- 50 studs away
-            
-            -- Try to teleport
-            HumanoidRootPart.CFrame = CFrame.new(retreatPos)
-            wait(3) -- Wait for health to recover
-            StatusLabel.Text = "Status: Running"
-        end
-    end
-end
+---------------------------
+-- Team Functions
+---------------------------
 
--- Function to start auto farm
-function startAutoFarm()
-    if autoFarmConnection then return end
-    
-    local killCount = 0
-    
-    autoFarmConnection = RunService.Heartbeat:Connect(function()
-        -- Update Character reference if needed
-        if not Character or not Character:FindFirstChild("HumanoidRootPart") then
-            Character = LocalPlayer.Character
-            if Character then
-                Humanoid = Character:FindFirstChild("Humanoid")
-                HumanoidRootPart = Character:FindFirstChild("HumanoidRootPart")
-            end
-            return
-        end
-        
-        -- Handle respawning if character is dead
-        if Character and Character:FindFirstChild("Humanoid") and Character.Humanoid.Health <= 0 then
-            handleRespawn()
-            return
-        end
-        
-        -- Refresh target periodically
-        local currentTime = tick()
-        if currentTime - lastTargetRefresh > targetRefreshRate then
-            nearestTarget, targetDistance = getNearestTarget()
-            lastTargetRefresh = currentTime
-            
-            -- Update target display
-            if nearestTarget then
-                local targetName = nearestTarget.Name
-                TargetLabel.Text = "Target: " .. targetName .. " (" .. math.floor(targetDistance) .. " studs)"
-            else
-                TargetLabel.Text = "Target: None"
-            end
-        end
-        
-        -- Check if we have a valid target
-        if nearestTarget and nearestTarget:FindFirstChild("HumanoidRootPart") and nearestTarget:FindFirstChild("Humanoid") then
-            -- Check if target is still alive
-            if nearestTarget.Humanoid.Health <= 0 then
-                killCount = killCount + 1
-                KillsLabel.Text = "Kills: " .. killCount
-                nearestTarget = nil
-                return
-            end
-            
-            -- Handle avoiding damage if health is low
-            handleAvoidDamage()
-            
-            -- Teleport to target if enabled
-            if TeleportToTargetsEnabled then
-                local targetPos = nearestTarget.HumanoidRootPart.Position
-                -- Teleport behind the target slightly
-                local targetCF = nearestTarget.HumanoidRootPart.CFrame
-                local behindPos = targetCF.Position - (targetCF.LookVector * 5)
+-- Join random team
+local function JoinRandomTeam()
+    safeSpawn(function(taskId)
+        while taskShouldRun(taskId) and autoJoinRandomTeamEnabled do
+            if not player.Team or player.Team.Name == "Visitor" then
+                -- Select random team and role
+                local randomTeam = teams[math.random(1, #teams)]
+                local randomRole = roles[math.random(1, #roles)]
                 
-                if (HumanoidRootPart.Position - behindPos).Magnitude > 10 then
-                    HumanoidRootPart.CFrame = CFrame.new(behindPos, targetPos)
-                end
+                -- Fire team selection remote
+                local args = {randomTeam, randomRole}
+                game:GetService("ReplicatedStorage").Packages.Knit.Services.TeamService.RE.Select:FireServer(unpack(args))
+                
+                -- Wait to check if team join was successful
+                local startTime = tick()
+                repeat
+                    task.wait(0.1)
+                until (player.Team and player.Team.Name ~= "Visitor") or (tick() - startTime > 3)
             end
-            
-            -- Aim at the target
-            local targetPos = aimAtTarget(nearestTarget)
-            
-            -- Shoot at the target
-            shootAtTarget()
-        else
-            -- Look for a new target
-            StatusLabel.Text = "Status: Searching for targets"
+            task.wait(1)
         end
     end)
 end
 
--- Function to stop auto farm
-function stopAutoFarm()
-    if autoFarmConnection then
-        autoFarmConnection:Disconnect()
-        autoFarmConnection = nil
-    end
+-- Join Home Team
+local function JoinHomeTeam()
+    safeSpawn(function(taskId)
+        while taskShouldRun(taskId) and autoJoinHomeEnabled do
+            if player.Team and player.Team.Name == "Visitor" then
+                local args = {"Home", selectedRole or "CF"}
+                game:GetService("ReplicatedStorage").Packages.Knit.Services.TeamService.RE.Select:FireServer(unpack(args))
+                task.wait(1) -- Short wait after attempting to join
+            end
+            task.wait(5) -- Check every 5 seconds if we're back in Visitor team
+        end
+    end)
+end
+
+-- Join Away Team
+local function JoinAwayTeam()
+    safeSpawn(function(taskId)
+        while taskShouldRun(taskId) and autoJoinAwayEnabled do
+            if player.Team and player.Team.Name == "Visitor" then
+                local args = {"Away", selectedRole or "CF"}
+                game:GetService("ReplicatedStorage").Packages.Knit.Services.TeamService.RE.Select:FireServer(unpack(args))
+                task.wait(1) -- Short wait after attempting to join
+            end
+            task.wait(5) -- Check every 5 seconds if we're back in Visitor team
+        end
+    end)
+end
+
+---------------------------
+-- Ball Handling Functions
+---------------------------
+
+-- Auto goal scoring function
+local function autoGoal()
+    safeSpawn(function(taskId)
+        while taskShouldRun(taskId) and autoGoalEnabled do
+            local character, root = waitForCharacter()
+            if not character or not root then 
+                task.wait(0.5)
+                continue 
+            end
+
+            local team = player.Team
+            if not team or team.Name == "Visitor" then
+                task.wait(0.5)
+                continue
+            end
+            
+            local goal = team.Name == "Away" and homeGoalPosition or awayGoalPosition
+            local football = getBall()
+
+            if football and football.Char.Value == character then
+                -- Create a body velocity to control the ball
+                local BV = Instance.new("BodyVelocity")
+                BV.Velocity = (Vector3.new(goal.X, goal.Y, goal.Z) - football.Position).Unit * 500
+                BV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+                BV.Parent = football
+
+                -- Position the ball in the goal
+                football.CFrame = CFrame.new(goal)
+
+                -- Clean up after a short delay
+                task.delay(0.1, function()
+                    if BV and BV.Parent then
+                        BV:Destroy()
+                    end
+                end)
+
+                task.wait(0.2)
+                
+                -- Shoot the ball with slight randomization for anticheat avoidance
+                ballServiceRemote:FireServer(
+                    randomizeValue(60, 5), 
+                    nil, 
+                    nil, 
+                    Vector3.new(
+                        randomizeValue(-0.6976, 2),
+                        randomizeValue(-0.3905, 2),
+                        randomizeValue(-0.6007, 2)
+                    )
+                )
+                
+                task.wait(0.5)
+            else
+                task.wait(0.1)
+            end
+        end
+    end)
+end
+
+-- Auto steal the ball from other players
+local function autoSteal()
+    safeSpawn(function(taskId)
+        while taskShouldRun(taskId) and autoStealEnabled do
+            local character, root = waitForCharacter()
+            if not character or not root then 
+                task.wait(0.5)
+                continue 
+            end
+
+            local targetPlayer, closestDistance = nil, math.huge
+            
+            for _, otherPlayer in ipairs(Players:GetPlayers()) do
+                if otherPlayer == player then continue end
+                
+                local otherCharacter = otherPlayer.Character
+                if not otherCharacter or not otherCharacter:FindFirstChild("Football") or not otherCharacter:FindFirstChild("HumanoidRootPart") then 
+                    continue 
+                end
+                
+                local distance = (root.Position - otherCharacter.HumanoidRootPart.Position).Magnitude
+                if distance < closestDistance then
+                    closestDistance = distance
+                    targetPlayer = otherPlayer
+                end
+            end
+            
+            if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                -- Add slight offset to position for less obvious teleportation
+                local offset = Vector3.new(
+                    math.random(-5, 5) / 10,
+                    0,
+                    math.random(-5, 5) / 10
+                )
+                root.CFrame = targetPlayer.Character.HumanoidRootPart.CFrame * CFrame.new(offset)
+                
+                -- Slide tackle
+                slideRemote:FireServer(targetPlayer)
+                task.wait(0.1)
+            else
+                task.wait(0.2)
+            end
+        end
+    end)
+end
+
+-- Auto teleport to the ball
+local function autoTPBall()
+    safeSpawn(function(taskId)
+        while taskShouldRun(taskId) and autoTPBallEnabled do
+            local character, root = waitForCharacter()
+            if not character or not root then 
+                task.wait(0.5)
+                continue 
+            end
+
+            local ball = getBall()
+            if ball then
+                -- Add some height to prevent clipping into ground
+                local ballPos = ball:GetPivot().Position
+                root.CFrame = CFrame.new(ballPos.X, ballPos.Y + 1.5, ballPos.Z)
+                task.wait(0.05)
+            else
+                task.wait(0.2)
+            end
+        end
+    end)
+end
+
+-- Auto farm function (combines multiple features)
+local function autoFarm()
+    if not autofarmEnabled then return end
     
-    -- Reset position if needed
-    if originalCF and HumanoidRootPart then
-        HumanoidRootPart.CFrame = originalCF
+    safeSpawn(function(taskId)
+        -- Handle joining game if not already joined
+        if IsVisitor() then
+            local joinSuccess = false
+            for _, v in ipairs(ReplicatedStorage.Teams:GetDescendants()) do
+                if v:IsA("ObjectValue") and v.Value == nil then
+                    local args = {string.sub(v.Parent.Name, 1, #v.Parent.Name - 4), v.Name}
+                    ReplicatedStorage.Packages.Knit.Services.TeamService.RE.Select:FireServer(unpack(args))
+                    joinSuccess = true
+                    break
+                end
+            end
+            
+            if not joinSuccess then
+                return -- Can't join a team
+            end
+            
+            task.wait(1) -- Wait for team join to process
+        end
+        
+        -- Skip if we're not in game or goal was just scored
+        if not IsInGame() or IsScored() then
+            return
+        end
+        
+        local character = player.Character
+        local root = character and character:FindFirstChild("HumanoidRootPart")
+        
+        -- Try to steal the ball if we don't have it
+        if root and not hasBall() then
+            local football = getBall()
+            
+            -- If ball is on the ground, go to it
+            if football and not football.Anchored and football.Char.Value ~= character then
+                root.CFrame = CFrame.new(football.Position.X, 9, football.Position.Z)
+            end
+            
+            -- Try to steal from opponents
+            for _, otherPlayer in ipairs(Players:GetPlayers()) do
+                if otherPlayer ~= player and otherPlayer.Team ~= player.Team then
+                    local otherCharacter = otherPlayer.Character
+                    local otherFootball = otherCharacter and otherCharacter:FindFirstChild("Football")
+                    local otherHRP = otherCharacter and otherCharacter:FindFirstChild("HumanoidRootPart")
+                    
+                    if otherFootball and otherHRP and root then
+                        root.CFrame = otherFootball.CFrame * CFrame.new(0, 3, 0)
+                        slideRemote:FireServer()
+                        break
+                    end
+                end
+            end
+        end
+        
+        -- If we have the ball, shoot
+        local playerFootball = character and character:FindFirstChild("Football")
+        if playerFootball then
+            ballServiceRemote:FireServer(60, nil, nil, Vector3.new(-0.6976, -0.3905, -0.6007))
+        end
+        
+        -- Get the ball and direct it to the goal
+        local football = getBall()
+        if football and football.Char.Value == character then
+            -- Remove any existing velocity
+            if football:FindFirstChild("BodyVelocity") then
+                football.BodyVelocity:Destroy()
+            end
+            
+            -- Get appropriate goal
+            local goal = player.Team.Name == "Away" and AwayGoal or HomeGoal
+            
+            -- Add our own velocity toward goal
+            local BV = Instance.new("BodyVelocity")
+            BV.Velocity = Vector3.new(0, 0, 0)
+            BV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+            BV.Parent = football
+            
+            -- Position at goal
+            football.CFrame = goal.CFrame
+            
+            -- Clean up after a short delay
+            task.delay(0.1, function()
+                if BV and BV.Parent then
+                    BV:Destroy()
+                end
+            end)
+        end
+    end)
+end
+
+-- Auto goalkeeper function
+local function autoGoalKeeper()
+    safeSpawn(function(taskId)
+        while taskShouldRun(taskId) and autoGoalKeeperEnabled do
+            local character, root = waitForCharacter()
+            if not character or not root then 
+                task.wait(0.5)
+                continue 
+            end
+            
+            local ball = getBall()
+            if ball and ball.AssemblyLinearVelocity.Magnitude > 5 then
+                -- Use prediction distance to intercept ball
+                root.CFrame = CFrame.new(
+                    ball.Position + (ball.AssemblyLinearVelocity * predictionDistance)
+                )
+            end
+            task.wait()
+        end
+    end)
+end
+
+-- Auto bring ball to player function
+local function autoBring()
+    safeSpawn(function(taskId)
+        while taskShouldRun(taskId) and autoBringEnabled do
+            local character = player.Character
+            local root = character and character:FindFirstChild("HumanoidRootPart")
+            local ball = getBall()
+            
+            if ball and root then
+                -- Instantly move the ball to the player's position
+                local BV = Instance.new("BodyVelocity")
+                BV.Velocity = (root.Position - ball.Position).Unit * 500
+                BV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+                BV.Parent = ball
+
+                task.delay(0.1, function()
+                    if BV and BV.Parent then
+                        BV:Destroy()
+                    end
+                end)
+            end
+            task.wait(0.1)
+        end
+    end)
+end
+
+-- Teleport to appropriate goal
+local function teleportToGoal()
+    if not autoTPEnabled then return end
+    
+    local character = player.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    
+    if autoTPHomeEnabled then
+        root.CFrame = homeGoalCFrame
+        if humanoid then
+            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    elseif autoTPAwayEnabled then
+        root.CFrame = awayGoalCFrame
+        if humanoid then
+            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
     end
 end
 
--- Close button functionality
-CloseButton.MouseButton1Click:Connect(function()
-    stopAutoFarm()
-    ScreenGui:Destroy()
-end)
-
--- Character respawn handling
-LocalPlayer.CharacterAdded:Connect(function(newCharacter)
-    Character = newCharacter
-    Humanoid = newCharacter:WaitForChild("Humanoid")
-    HumanoidRootPart = newCharacter:WaitForChild("HumanoidRootPart")
+-- Teleport ball to player
+local function tpBallToYou()
+    if not tpBallToYouEnabled then return end
     
-    -- If auto farm is still enabled, restart it after a brief delay
-    if AutoFarmEnabled then
-        wait(1)
-        startAutoFarm()
+    local character = player.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    
+    local ball = getBall()
+    if ball and ball.AssemblyLinearVelocity.Magnitude < 35 then
+        ball:ApplyImpulse(
+            (root.Position + Vector3.new(0, -2.5, 0) - ball.Position).Unit * 18
+        )
+    end
+end
+
+-- Auto dribble function
+local function autoDribble()
+    if not autoDribbleEnabled then return end
+    
+    local character = player.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+    
+    local root = character.HumanoidRootPart
+    local dribbleRemote = ReplicatedStorage.Packages.Knit.Services.BallService.RE.Dribble
+    local animations = require(ReplicatedStorage.Assets.Animations)
+    local humanoid = character:FindFirstChild("Humanoid")
+    
+    -- Function to get animation
+    local function getAnimation(style)
+        if not animations.Dribbles[style] then return nil end
+        local anim = Instance.new("Animation")
+        anim.AnimationId = animations.Dribbles[style]
+        return humanoid and humanoid:LoadAnimation(anim)
+    end
+    
+    -- Function to check if player is sliding
+    local function isSliding(targetPlayer)
+        if targetPlayer == player then return false end
+        local targetChar = targetPlayer.Character
+        if not targetChar then return false end
+        
+        local values = targetChar.Values and targetChar.Values.Sliding
+        if values and values.Value == true then return true end
+        
+        local targetHumanoid = targetChar:FindFirstChildOfClass("Humanoid")
+        if targetHumanoid and targetHumanoid.MoveDirection.Magnitude > 0 and targetHumanoid.WalkSpeed == 0 then 
+            return true 
+        end
+        
+        return false
+    end
+    
+    -- Function to check if player is opponent
+    local function isOpponent(targetPlayer)
+        if not player.Team or not targetPlayer.Team then return false end
+        return player.Team ~= targetPlayer.Team
+    end
+    
+    -- Function to perform dribble
+    local function performDribble(distance)
+        if not autoDribbleEnabled or not character.Values.HasBall.Value then return end
+        
+        -- Trigger dribble remote
+        dribbleRemote:FireServer()
+        
+        -- Play animation
+        local style = player.PlayerStats.Style.Value
+        local animation = getAnimation(style)
+        if animation then
+            animation:Play()
+            animation:AdjustSpeed(math.clamp(1 + (10 - distance) / 10, 1, 2))
+        end
+        
+        -- Control the ball
+        local football = getBall()
+        if football then
+            football.AssemblyLinearVelocity = Vector3.new()
+            football.CFrame = root.CFrame * CFrame.new(0, -2.5, 0)
+        end
+    end
+    
+    -- Check all players to find sliding opponents
+    for _, targetPlayer in pairs(Players:GetPlayers()) do
+        if isOpponent(targetPlayer) and isSliding(targetPlayer) then
+            local targetRoot = targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if targetRoot then
+                local distance = (targetRoot.Position - root.Position).Magnitude
+                if distance < 22 then
+                    performDribble(distance)
+                    break
+                end
+            end
+        end
+    end
+end
+
+---------------------------
+-- Movement Functions
+---------------------------
+
+-- Flying function
+local function flyFunction()
+    -- Store original gravity
+    originalGravity = workspace.Gravity
+    
+    -- Set gravity to zero
+    workspace.Gravity = 0
+    
+    safeSpawn(function(taskId)
+        while taskShouldRun(taskId) and flying do
+            local character, root = waitForCharacter()
+            if not character or not root then 
+                task.wait(0.5)
+                continue 
+            end
+            
+            local MoveDirection = Vector3.new()
+            local cameraCFrame = workspace.CurrentCamera.CFrame
+    
+            -- Calculate movement direction based on WASD keys
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+                MoveDirection = MoveDirection + cameraCFrame.LookVector
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+                MoveDirection = MoveDirection - cameraCFrame.LookVector
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+                MoveDirection = MoveDirection - cameraCFrame.RightVector
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+                MoveDirection = MoveDirection + cameraCFrame.RightVector
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+                MoveDirection = MoveDirection + Vector3.new(0, 1, 0)
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+                MoveDirection = MoveDirection - Vector3.new(0, 1, 0)
+            end
+    
+            -- Normalize and apply velocity with some randomization to avoid detection
+            if MoveDirection.Magnitude > 0 then
+                MoveDirection = MoveDirection.Unit * randomizeValue(flySpeed, 10)
+                root.Velocity = MoveDirection
+            else
+                root.Velocity = Vector3.new(0, 0, 0)
+            end
+    
+            -- Gradually increase speed for smoother acceleration
+            flySpeed = math.min(flySpeed + speedIncrement, maxFlySpeed)
+    
+            task.wait()
+        end
+        
+        -- Reset gravity when flying is disabled
+        workspace.Gravity = originalGravity
+    end)
+end
+
+-- Simple function to toggle flying
+local function toggleFly()
+    flying = not flying
+    
+    if flying then
+        flyFunction()
+    else
+        -- Gravity will be reset in the fly function when it detects flying is disabled
+    end
+end
+
+-- Aimlock function
+local function aimlock()
+    safeSpawn(function(taskId)
+        while taskShouldRun(taskId) and aimlockEnabled do
+            local ball = getBall()
+            if ball and Camera and player.Character then
+                Camera.CFrame = CFrame.new(Camera.CFrame.Position, ball.Position)
+            end
+            task.wait()
+        end
+    end)
+end
+
+---------------------------
+-- Anti-AFK Function
+---------------------------
+
+-- Simple Anti-AFK function
+local function antiAFK()
+    safeSpawn(function(taskId)
+        while taskShouldRun(taskId) and antiAFKEnabled do
+            -- Simulate activity to prevent AFK kick
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
+            task.wait(300) -- Wait 5 minutes between simulated interactions
+        end
+    end)
+end
+
+---------------------------
+-- Setup and Initialization
+---------------------------
+
+-- Initialize references
+updateCharacterReferences()
+
+-- Set up character tracking
+local characterAddedConnection = player.CharacterAdded:Connect(updateCharacterReferences)
+table.insert(connections, characterAddedConnection)
+
+-- Set up anti-AFK for Idle events
+local idledConnection = player.Idled:Connect(function()
+    if antiAFKEnabled then
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
     end
 end)
+table.insert(connections, idledConnection)
 
--- Notification on load
-game:GetService("StarterGui"):SetCore("SendNotification", {
-    Title = "LAJ HUB | Dead Rails",
-    Text = "Auto Farm loaded successfully!",
-    Duration = 5
+-- Set up ESP rendering
+local espConnection = RunService.RenderStepped:Connect(FootballESP)
+table.insert(connections, espConnection)
+
+-- Set up auto teleport to ball when enabled
+local heartbeatConnection = RunService.Heartbeat:Connect(function()
+    -- Deal with ball and goal teleportation
+    if rootPart then
+        local ball = getBall()
+        
+        -- Auto TP to ball if enabled and far from ball
+        if autoTPEnabled and ball then
+            local distance = (rootPart.Position - ball.Position).Magnitude
+            if distance > 5 then
+                rootPart.CFrame = ball.CFrame + Vector3.new(0, 1.5, 0)
+            end
+        end
+        
+        -- If we have the ball, teleport to goal if enabled
+        if ball and ball.Parent and ball.Parent:IsA("Model") and 
+           ball.Parent:FindFirstChild("Humanoid") and ball.Parent.Name == player.Name then
+            teleportToGoal()
+        end
+    end
+    
+    -- Always check these features
+    if autoDribbleEnabled then
+        autoDribble()
+    end
+    
+    if tpBallToYouEnabled then
+        tpBallToYou()
+    end
+    
+    -- Auto farm function needs to run per-frame for best results
+    if autofarmEnabled then
+        autoFarm()
+    end
+end)
+table.insert(connections, heartbeatConnection)
+
+-- Create No Cooldown function (extracted from UI callback for reuse)
+local function enableNoCD()
+    local C = require(game:GetService("ReplicatedStorage").Controllers.AbilityController)
+    local o = C.AbilityCooldown
+    C.AbilityCooldown = function(s, n, ...)
+        return o(s, n, 0, ...)
+    end
+end
+
+-- Create Anti-Ragdoll function
+local function enableAntiRagdoll()
+    safeSpawn(function(taskId)
+        while taskShouldRun(taskId) and antiRagdoll do
+            local character = player.Character
+            if character and character:FindFirstChild("Ragdolled") then
+                character.Ragdolled:Destroy()
+            end
+            task.wait()
+        end
+    end)
+end
+
+-- Expose functions to the Luna UI
+local Luna = loadstring(game:HttpGet("https://paste.ee/r/WSCKThwW", true))()
+getgenv().Multiplier = 0.5 -- For CFrame speed
+
+-- Create window
+local Window = Luna:CreateWindow({
+    Name = "LAJ HUB (Blue Lock Rivals)",
+    Subtitle = "by LAJ HUB Team",
+    LogoID = "75237883871377",
+    LoadingEnabled = true,
+    LoadingTitle = "LAJ HUB (Blue Lock Rivals)",
+    LoadingSubtitle = "by LAJ HUB Team",
+    ConfigSettings = {
+        RootFolder = "LAJHUB", 
+        ConfigFolder = "Configs", 
+        AutoLoadConfig = true 
+    },
 })
 
-print("LAJ HUB Dead Rails Auto Farm Loaded")
+Window:CreateHomeTab({
+    SupportedExecutors = {"Delta", "Fluxus", "Codex", "Cryptic", "Vegax", "Trigon", "Synapse X", "Script-Ware", "KRNL", "Seliware", "Solara", "Xeno", "ZORARA", "Luna", "Nihon", "JJsploit", "AWP", "Wave", "Ronix"},
+    DiscordInvite = "https://discord.gg/D3T4ArjBqk",
+    Icon = 75237883871377,
+})
+
+-- Create tabs
+local MainTab = Window:CreateTab({
+    Name = "Main",
+    Icon = "home_filled",
+    ImageSource = "Material",
+    ShowTitle = true
+})
+
+local CharacterTab = Window:CreateTab({
+    Name = "Local Player",
+    Icon = "account_circle",
+    ImageSource = "Material",
+    ShowTitle = true
+})
+
+local ESPTab = Window:CreateTab({
+    Name = "ESP",
+    Icon = "visibility",
+    ImageSource = "Material",
+    ShowTitle = true
+})
+
+local TeamTab = Window:CreateTab({
+    Name = "Team",
+    Icon = "group_work",
+    ImageSource = "Material",
+    ShowTitle = true
+})
+
+local StyleTab = Window:CreateTab({
+    Name = "Styles",
+    Icon = "brush",
+    ImageSource = "Material",
+    ShowTitle = true
+})
+
+local FlowTab = Window:CreateTab({
+    Name = "Flow",
+    Icon = "waves",
+    ImageSource = "Material",
+    ShowTitle = true
+})
+
+local CosmeticTab = Window:CreateTab({
+    Name = "Cosmetics",
+    Icon = "stars",
+    ImageSource = "Material",
+    ShowTitle = true
+})
+
+local UITab = Window:CreateTab({
+    Name = "UI Settings",
+    Icon = "settings_applications",
+    ImageSource = "Material",
+    ShowTitle = true
+})
+
+-- Add UI Controls
+MainTab:CreateSection("Autofarm Features")
+
+MainTab:CreateToggle({
+    Name = "Auto Farm (OP)",
+    Description = " Enables Overpowered Auto Farm 100% Accuracy Winning When Enabled!",
+    CurrentValue = false,
+    Callback = function(Value)
+        autofarmEnabled = Value
+    end
+})
+
+MainTab:CreateToggle({
+    Name = "Auto Steal",
+    Description = "Enable auto steal",
+    CurrentValue = false,
+    Callback = function(Value)
+        autoStealEnabled = Value
+        if Value then
+            autoSteal()
+        end
+    end
+})
+
+MainTab:CreateToggle({
+    Name = "Auto Goal",
+    Description = "Automatically score goals when you have the ball",
+    CurrentValue = false,
+    Callback = function(Value)
+        autoGoalEnabled = Value
+        if Value then
+            autoGoal()
+        end
+    end
+})
+
+MainTab:CreateToggle({
+    Name = "Auto TP Ball",
+    Description = "Automatically teleport to the ball",
+    CurrentValue = false,
+    Callback = function(Value)
+        autoTPBallEnabled = Value
+        if Value then
+            autoTPBall()
+        end
+    end
+})
+
+MainTab:CreateToggle({
+    Name = "Auto Goal Keeper",
+    Description = "Automatically move to block incoming balls",
+    CurrentValue = false,
+    Callback = function(Value)
+        autoGoalKeeperEnabled = Value
+        if Value then
+            autoGoalKeeper()
+        end
+    end
+})
+
+MainTab:CreateSlider({
+    Name = "Goal Keeper Prediction Distance",
+    Description = "Adjust the goal keeper prediction distance",
+    Range = {0, 1},
+    Increment = 0.01,
+    Suffix = "Seconds",
+    CurrentValue = 0.1,
+    Callback = function(Value)
+        predictionDistance = Value
+    end,
+})
+
+MainTab:CreateSection("TP Features")
+
+MainTab:CreateToggle({
+    Name = "Auto Teleport Ball",
+    Description = nil,
+    CurrentValue = false,
+    Callback = function(Value)
+        autoTPEnabled = Value
+    end
+})
+
+MainTab:CreateToggle({
+    Name = "Auto TP to Home Goal",
+    Description = nil,
+    CurrentValue = false,
+    Callback = function(Value)
+        autoTPHomeEnabled = Value
+    end
+})
+
+MainTab:CreateToggle({
+    Name = "Auto TP to Away Goal",
+    Description = nil,
+    CurrentValue = false,
+    Callback = function(Value)
+        autoTPAwayEnabled = Value
+    end
+})
+
+MainTab:CreateToggle({
+    Name = "TP Ball to You",
+    Description = nil,
+    CurrentValue = false,
+    Callback = function(Value)
+        tpBallToYouEnabled = Value
+    end
+})
+
+MainTab:CreateSection("Special Abilities")
+
+MainTab:CreateToggle({
+    Name = "No CD",
+    Description = nil,
+    CurrentValue = false,
+    Callback = function(Value)
+        noCDEnabled = Value
+        if Value then
+            enableNoCD()
+        else
+            Luna:Notification({
+                Title = "No CD Warning",
+                Content = "Restart the script to revert cooldowns",
+                Icon = "warning",
+                ImageSource = "Material"
+            })
+        end
+    end
+})
+
+MainTab:CreateToggle({
+    Name = "Auto Dribble",
+    Description = nil,
+    CurrentValue = false,
+    Callback = function(Value)
+        autoDribbleEnabled = Value
+    end
+})
+
+MainTab:CreateSection("Anti-AFK")
+
+MainTab:CreateToggle({
+    Name = "Anti-AFK",
+    Description = "Prevent being kicked for inactivity",
+    CurrentValue = false,
+    Callback = function(Value)
+        antiAFKEnabled = Value
+        if Value then
+            antiAFK()
+            Luna:Notification({
+                Title = "Anti-AFK Enabled",
+                Content = "You will not be kicked for inactivity",
+                Icon = "check_circle",
+                ImageSource = "Material"
+            })
+        end
+    end
+})
+
+ESPTab:CreateSection("ESP Options")
+
+ESPTab:CreateToggle({
+    Name = "Football ESP",
+    Description = "Show football ESP overlay",
+    CurrentValue = false,
+    Callback = function(Value)
+        FootballESPEnabled = Value
+        if not Value then
+            ClearESP()
+        end
+    end
+})
+
+TeamTab:CreateSection("Team Selection")
+
+TeamTab:CreateDropdown({
+    Name = "Select Team",
+    Description = "Choose your team",
+    Options = {"Home", "Away"},
+    CurrentOption = {"Home"},
+    MultipleOptions = false,
+    Callback = function(Option)
+        selectedTeam = Option
+    end
+})
+
+TeamTab:CreateDropdown({
+    Name = "Select Role",
+    Description = "Choose your role",
+    Options = {"CF", "GK", "LW", "RW", "CM"},
+    CurrentOption = {"CF"},
+    MultipleOptions = false,
+    Callback = function(Option)
+        selectedRole = Option
+    end
+})
+
+TeamTab:CreateToggle({
+    Name = "Auto Join Home",
+    Description = "Automatically join home team when visitor",
+    CurrentValue = false,
+    Callback = function(Value)
+        autoJoinHomeEnabled = Value
+        if Value then
+            JoinHomeTeam()
+        end
+    end
+})
+
+TeamTab:CreateToggle({
+    Name = "Auto Join Away",
+    Description = "Automatically join away team when visitor",
+    CurrentValue = false,
+    Callback = function(Value)
+        autoJoinAwayEnabled = Value
+        if Value then
+            JoinAwayTeam()
+        end
+    end
+})
+
+TeamTab:CreateToggle({
+    Name = "Auto Join Random Team",
+    Description = "Automatically join a random team when visitor",
+    CurrentValue = false,
+    Callback = function(Value)
+        autoJoinRandomTeamEnabled = Value
+        if Value then
+            JoinRandomTeam()
+        end
+    end
+})
+
+CharacterTab:CreateSection("Character Modifications")
+
+CharacterTab:CreateToggle({
+    Name = "Infinite Stamina",
+    Description = "Never run out of stamina",
+    CurrentValue = false,
+    Callback = function(Value)
+        if Value then
+            safeSpawn(function(taskId)
+                while taskShouldRun(taskId) and Value do
+                    if player.PlayerStats and player.PlayerStats:FindFirstChild("Stamina") then
+                        player.PlayerStats.Stamina.Value = 100
+                    end
+                    task.wait(0.1)
+                end
+            end)
+        end
+    end
+})
+
+CharacterTab:CreateToggle({
+    Name = "Fly",
+    Description = "Toggle flying ability (Use WASD, Space, and Shift to move)",
+    CurrentValue = false,
+    Callback = function(Value)
+        if Value ~= flying then
+            toggleFly()
+        end
+    end
+})
+
+CharacterTab:CreateToggle({
+    Name = "Anti Ragdoll",
+    Description = "Prevent ragdolling",
+    CurrentValue = false,
+    Callback = function(Value)
+        antiRagdoll = Value
+        if Value then
+            enableAntiRagdoll()
+        end
+    end
+})
+
+-- Other UI elements omitted for brevity
+
+-- Clean up function (should be called when script is unloaded)
+local function cleanup()
+    -- Disable all features
+    FootballESPEnabled = false
+    autofarmEnabled = false
+    autoGoalEnabled = false
+    autoStealEnabled = false
+    autoTPBallEnabled = false
+    autoJoinRandomTeamEnabled = false
+    autoJoinHomeEnabled = false
+    autoJoinAwayEnabled = false
+    autoTPEnabled = false
+    autoTPHomeEnabled = false
+    autoTPAwayEnabled = false
+    autoDribbleEnabled = false
+    autoGoalKeeperEnabled = false
+    autoBringEnabled = false
+    tpBallToYouEnabled = false
+    flying = false
+    antiRagdoll = false
+    antiAFKEnabled = false
+    
+    -- Cancel all running tasks
+    for taskId in pairs(runningTasks) do
+        runningTasks[taskId] = nil
+    end
+    
+    -- Clear ESP
+    ClearESP()
+    
+    -- Disconnect all connections
+    for _, connection in ipairs(connections) do
+        connection:Disconnect()
+    end
+    connections = {}
+    
+    -- Reset gravity
+    workspace.Gravity = originalGravity
+    
+    -- Notify user
+    Luna:Notification({
+        Title = "Script Disabled",
+        Content = "All features have been disabled",
+        Icon = "info",
+        ImageSource = "Material"
+    })
+end
+
+-- Add cleanup button to UI
+UITab:CreateButton({
+    Name = "Disable All Features",
+    Description = "Turns off all script features",
+    Callback = cleanup
+})
+
+-- Add destroy GUI button
+UITab:CreateButton({
+    Name = "Destroy GUI",
+    Description = "Close the GUI",
+    Callback = function()
+        cleanup()
+        for _, connection in pairs(getconnections(game:GetService("CoreGui").ChildAdded)) do
+            connection:Disable()
+        end
+        if game:GetService("CoreGui"):FindFirstChild("Luna") then
+            game:GetService("CoreGui").Luna:Destroy()
+        end
+    end
+})
+
+-- Initial notification
+Luna:Notification({
+    Title = "LAJ HUB Loaded",
+    Content = "Blue Lock Rivals module has been initialized successfully!",
+    Icon = "check_circle",
+    ImageSource = "Material"
+})
+
+-- Return the created UI for external use
+return Window
